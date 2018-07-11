@@ -1,0 +1,834 @@
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <cstdlib>
+
+#include "GL/glew.h"
+#include "GL/freeglut.h"
+#include "Vector3.h"
+#include "Vector4.h"
+#include "Matrix3x3.h"
+#include "Matrix4x4.h"
+#include "Quaternion.h"
+#include "MyMathLib.h"
+#include "GeometricCube.h"
+
+#define CAPTION "Hello New World"
+
+int WinX = 640, WinY = 480;
+int WindowHandle = 0;
+unsigned int FrameCount = 0;
+
+#define VERTICES 0
+#define COLORS 1
+#define ORTHO 0
+#define PERSPECTIVE 1
+#define ON 1
+#define OFF 0
+
+//GLuint VaoId, VboId[2];
+GLuint VaoId[7], VboId[7][2];
+GLuint VertexShaderId, FragmentShaderId, ProgramId;
+GLint UboId, UniformId;
+const GLuint UBO_BP = 0;
+
+// Camera Spherical Coordinates
+float alpha = 0.0f, beta = 0.0f;
+float r = 8.0f;
+
+// Camera Position
+float camX, camY, camZ;
+
+// Mouse Tracking Variables
+int startX, startY, startZ, tracking = 0;
+int deltaX, deltaY;
+float alphaAux, betaAux = 1.0f;
+
+//Quaternion q0 = Quaternion(1.0f, 0.0f, 0.0f, 0.0f);
+int perspective = ORTHO;
+int gimbalLock = ON;
+
+ShaderProgram shaderProgram;
+
+int LastMousePositionX, LastMousePositionY;
+float RotationAngleX = 0.0f;
+float RotationAngleY = 0.0f;
+
+/////////////////////////////////////////////////////////////////////// ERRORS
+
+bool isOpenGLError() {
+	bool isError = false;
+	GLenum errCode;
+	const GLubyte *errString;
+	while ((errCode = glGetError()) != GL_NO_ERROR) {
+		isError = true;
+		errString = gluErrorString(errCode);
+		std::cerr << "OpenGL ERROR [" << errString << "]." << std::endl;
+	}
+	return isError;
+}
+
+void checkOpenGLError(std::string error)
+{
+	if (isOpenGLError()) {
+		std::cerr << error << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+/////////////////////////////////////////////////////////////////////// SHADERs
+
+const GLchar* VertexShader =
+{
+	"#version 330 core\n"
+
+	"in vec4 in_Position;\n"
+	"in vec4 in_Color;\n"
+	"out vec4 ex_Color;\n"
+
+	"uniform mat4 ModelMatrix;\n"
+
+	"uniform SharedMatrices\n"
+	"{\n"
+	"	mat4 ViewMatrix;\n"
+	"	mat4 ProjectionMatrix;\n"
+	"};\n"
+
+	"void main(void)\n"
+	"{\n"
+	"	gl_Position = ProjectionMatrix * ViewMatrix * ModelMatrix * in_Position;\n"
+	"	ex_Color = in_Color;\n"
+	"}\n"
+};
+
+const GLchar* FragmentShader =
+{
+	"#version 330 core\n"
+
+	"in vec4 ex_Color;\n"
+	"out vec4 out_Color;\n"
+
+	"void main(void)\n"
+	"{\n"
+	"	out_Color = ex_Color;\n"
+	"}\n"
+};
+
+void createShaderProgram()
+{
+	
+	VertexShaderId = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(VertexShaderId, 1, &VertexShader, 0);
+	glCompileShader(VertexShaderId);
+
+	FragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(FragmentShaderId, 1, &FragmentShader, 0);
+	glCompileShader(FragmentShaderId);
+
+	ProgramId = glCreateProgram();
+	glAttachShader(ProgramId, VertexShaderId);
+	glAttachShader(ProgramId, FragmentShaderId);
+
+	glBindAttribLocation(ProgramId, VERTICES, "in_Position");
+	glBindAttribLocation(ProgramId, COLORS, "in_Color");
+	glLinkProgram(ProgramId);
+	UniformId = glGetUniformLocation(ProgramId, "ModelMatrix");
+	UboId = glGetUniformBlockIndex(ProgramId, "SharedMatrices");
+	glUniformBlockBinding(ProgramId, UboId, UBO_BP);
+
+	checkOpenGLError("ERROR: Could not create shaders.");
+	
+}
+
+void destroyShaderProgram()
+{
+	glUseProgram(0);
+	glDetachShader(ProgramId, VertexShaderId);
+	glDetachShader(ProgramId, FragmentShaderId);
+
+	glDeleteShader(FragmentShaderId);
+	glDeleteShader(VertexShaderId);
+	glDeleteProgram(ProgramId);
+
+	checkOpenGLError("ERROR: Could not destroy shaders.");
+}
+
+/////////////////////////////////////////////////////////////////////// VAOs & VBOs
+
+typedef struct {
+	GLfloat XYZW[4];
+	GLfloat RGBA[4];
+} Vertex;
+
+
+typedef struct {
+	const Vertex *vertices;
+	int sizeVertices;
+} Figure;
+
+typedef GLfloat Matrix[16];
+/*
+const Vertex CubeVertices[] =
+{
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 0 - FRONT
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 1
+	{ { 1.0f, 1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 2
+	{ { 1.0f, 1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 2	
+	{ { 0.0f, 1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 0
+
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 1 - RIGHT
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 5
+	{ { 1.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 6
+	{ { 1.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 6	
+	{ { 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 2
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 1
+
+	{ { 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 2 - TOP
+	{ { 1.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 6
+	{ { 0.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 7
+	{ { 0.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 7	
+	{ { 0.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 3
+	{ { 1.0f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 2
+
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 5 - BACK
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 4
+	{ { 0.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 7
+	{ { 0.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 7	
+	{ { 1.0f, 1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 6
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.9f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 4 - LEFT
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 0
+	{ { 0.0f, 1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 3
+	{ { 0.0f, 1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 3	
+	{ { 0.0f, 1.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 7
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }, // 4
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 0 - BOTTOM
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 4
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 5
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 5	
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 1
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }  // 0
+};
+
+Figure Cube = {
+	{CubeVertices},
+	{sizeof(CubeVertices)}
+};
+*/
+const Vertex RhombusVertices[] =
+{
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 0 - FRONT
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 1
+	{ { 1.5f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 2
+	{ { 1.5f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 2	
+	{ { 0.5f, 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.4f, 1.0f } }, // 0
+
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 1 - RIGHT
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 5
+	{ { 1.5f, 1.0f, 0.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 6
+	{ { 1.5f, 1.0f, 0.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 6	
+	{ { 1.5f, 1.0f, 1.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 2
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.2f, 0.0f, 0.4f, 1.0f } }, // 1
+
+	{ { 1.5f, 1.0f, 1.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 2 - TOP
+	{ { 1.5f, 1.0f, 0.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 6
+	{ { 0.5f, 1.0f, 0.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 7
+	{ { 0.5f, 1.0f, 0.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 7	
+	{ { 0.5f, 1.0f, 1.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 3
+	{ { 1.5f, 1.0f, 1.0f, 1.0f },{ 0.4f, 0.0f, 0.4f, 1.0f } }, // 2
+
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 5 - BACK
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 4
+	{ { 0.5f, 1.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 7
+	{ { 0.5f, 1.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 7	
+	{ { 1.5f, 1.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 6
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.6f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 4 - LEFT
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 0
+	{ { 0.5f, 1.0f, 1.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 3
+	{ { 0.5f, 1.0f, 1.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 3	
+	{ { 0.5f, 1.0f, 0.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 7
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.28f, 0.0f, 0.6f, 1.0f } }, // 4
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 0 - BOTTOM
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 4
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 5
+	{ { 1.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 5	
+	{ { 1.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 1
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }  // 0
+};
+
+Figure Rhombus = {
+	{ RhombusVertices },
+	{ sizeof(RhombusVertices) }
+};
+
+const Vertex WhiteTriPrismVertices[] =
+{
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } },   // 3 - FRONT
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } }, // 4
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } },  // 5
+
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } }, // 5 - RIGHT   GREEN
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } }, // 2
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } },  // 3
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.6f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } },   // 0 - BACK   RED
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } },  // 2
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.8f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } }, // 1 - LEFT   MAGENTA
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } }, // 4
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } },   // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } },   // 3	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } },   // 0
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.9f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } }, // 4
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } }, // 1 - BOTTOM   YELLOW
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } },  // 5	
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.7f, 1.0f } } // 4
+	
+};
+
+Figure WhiteTriPrism = {
+	{ WhiteTriPrismVertices },
+	{ sizeof(WhiteTriPrismVertices) }
+};
+
+const Vertex RedTriPrismVertices[] =
+{
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } },   // 3 - FRONT
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 4
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } },  // 5
+
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } }, // 5 - RIGHT   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } }, // 2
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },  // 3
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } },   // 0 - BACK   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } },  // 2
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.0f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } }, // 1 - LEFT   
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } }, // 4
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } },   // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } },   // 3	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } },   // 0
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.0f, 0.0f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } }, // 4
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } }, // 1 - BOTTOM   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } },  // 5	
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.0f, 0.0f, 1.0f } } // 4
+
+};
+
+Figure RedTriPrism = {
+	{ RedTriPrismVertices },
+	{ sizeof(RedTriPrismVertices) }
+};
+
+const Vertex BlueTriPrismVertices[] =
+{
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } },   // 3 - FRONT
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 4
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } },  // 5
+
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 5 - RIGHT   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 2
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } },  // 3
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.6f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } },   // 0 - BACK   
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } }, // 1
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.9f, 1.0f } },  // 2
+
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } }, // 1 - LEFT   
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } }, // 4
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } },   // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } },   // 3	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } },   // 0
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.8f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } }, // 4
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } }, // 1 - BOTTOM   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } },  // 5	
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 0.7f, 1.0f } } // 4
+
+};
+
+Figure BlueTriPrism = {
+	{ BlueTriPrismVertices },
+	{ sizeof(BlueTriPrismVertices) }
+};
+
+const Vertex GreenTriPrismVertices[] =
+{
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } },   // 3 - FRONT
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } }, // 4
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.9f, 0.0f, 1.0f } },  // 5
+
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } }, // 5 - RIGHT   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } }, // 2
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } },  // 3
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.6f, 0.0f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.6f, 1.0f } },   // 0 - BACK   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.6f, 1.0f } },  // 2
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.9f, 0.6f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } }, // 1 - LEFT   
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } }, // 4
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } },   // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } },   // 3	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } },   // 0
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.8f, 0.0f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } }, // 4
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } }, // 1 - BOTTOM   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } },  // 5	
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.0f, 0.7f, 0.0f, 1.0f } } // 4
+
+};
+
+Figure GreenTriPrism = {
+	{ GreenTriPrismVertices },
+	{ sizeof(GreenTriPrismVertices) }
+};
+
+const Vertex YellowTriPrismVertices[] =
+{
+
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },   // 3 - FRONT
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 4
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },  // 5
+
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } }, // 5 - RIGHT   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } }, // 2
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } },  // 0
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } },  // 3
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.6f, 0.6f, 0.0f, 1.0f } }, // 5
+
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },   // 0 - BACK  
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },  // 2 
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } }, // 1 - LEFT   
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } }, // 4
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } },   // 3
+	{ { 0.0f, 0.0f, 1.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } },   // 3	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } },   // 0
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.8f, 0.8f, 0.0f, 1.0f } }, // 1
+
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } }, // 4
+	{ { -1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } }, // 1 - BOTTOM   
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 0.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } },  // 2
+	{ { 1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } },  // 5	
+	{ { -1.0f, -1.0f, 1.0f, 1.0f },{ 0.7f, 0.7f, 0.0f, 1.0f } } // 4
+
+};
+
+Figure YellowTriPrism = {
+	{ YellowTriPrismVertices },
+	{ sizeof(YellowTriPrismVertices) }
+};
+
+
+Vertex *createTriPrism(float r, float g, float b) {
+
+	Vertex prism[] = { { { 0.0f, 0.0f, 1.0f, 1.0f }, { r - 0.1f, g - 0.1f, b - 0.1f, 1.0f } },			// 3 - FRONT
+			{ { -1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.1f, g - 0.1f, b - 0.1f, 1.0f} },		// 4
+			{ { 1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.1f, g - 0.1f, b - 0.1f, 1.0f } },		// 5
+
+			{ { 1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 5 - RIGHT 
+			{ { 1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 2
+			{ { 0.0f, 0.0f, 0.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 0
+			{ { 0.0f, 0.0f, 0.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 0
+			{ { 0.0f, 0.0f, 1.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 3
+			{ { 1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.2f, g - 0.2f, b - 0.2f, 1.0f } },				// 5
+
+			{ { 0.0f, 0.0f, 0.0f, 1.0f },{ r - 0.1f, g - 0.1f, b - 0.1f, 1.0f } },   // 0 - BACK   RED
+			{ { -1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.1f, g - 0.1f, b - 0.1f, 1.0f } }, // 1
+			{ { 1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.1f, g - 0.1f, b - 0.1f, 1.0f } },  // 2
+
+			{ { -1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } }, // 1 - LEFT   MAGENTA
+			{ { -1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } }, // 4
+			{ { 0.0f, 0.0f, 1.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } },   // 3
+			{ { 0.0f, 0.0f, 1.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } },   // 3	
+			{ { 0.0f, 0.0f, 0.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } },   // 0
+			{ { -1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.3f, g - 0.3f, b - 0.3f, 1.0f } }, // 1
+
+			{ { -1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } }, // 4
+			{ { -1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } }, // 1 - BOTTOM   YELLOW
+			{ { 1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } },  // 2
+			{ { 1.0f, -1.0f, 0.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } },  // 2
+			{ { 1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } },  // 5	
+			{ { -1.0f, -1.0f, 1.0f, 1.0f },{ r - 0.4f, g - 0.4f, b - 0.4f, 1.0f } }	// 4
+						};	
+	return prism;
+}
+
+Figure solids[] = { Rhombus, YellowTriPrism, GreenTriPrism, RedTriPrism, BlueTriPrism, WhiteTriPrism, /*Cube*/ };
+
+void createBufferObjects()
+{
+	
+	glGenVertexArrays(7, VaoId);
+	for (int i = 0; i < 7; i++) {
+
+		glBindVertexArray(VaoId[i]);
+		{
+			glGenBuffers(2, VboId[i]);
+
+			glBindBuffer(GL_ARRAY_BUFFER, VboId[i][0]);
+			glBufferData(GL_ARRAY_BUFFER, solids[i].sizeVertices, solids[i].vertices, GL_STATIC_DRAW);
+
+			glEnableVertexAttribArray(VERTICES);
+			glVertexAttribPointer(VERTICES, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)0);
+
+			glEnableVertexAttribArray(COLORS);
+			glVertexAttribPointer(COLORS, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)sizeof(solids[i].vertices[0].XYZW));
+
+			glBindBuffer(GL_UNIFORM_BUFFER, VboId[i][1]);
+			glBufferData(GL_UNIFORM_BUFFER, sizeof(Matrix) * 2, 0, GL_STREAM_DRAW);
+			glBindBufferBase(GL_UNIFORM_BUFFER, i, VboId[i][1]);
+		}
+	}
+
+	checkOpenGLError("ERROR: Could not create VAOs and VBOs.");
+	
+}
+
+void destroyBufferObjects()
+{/*
+	glBindVertexArray(VaoId);
+	glDisableVertexAttribArray(VERTICES);
+	glDisableVertexAttribArray(COLORS);
+	glDeleteBuffers(2, VboId);
+	glDeleteVertexArrays(1, &VaoId);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	glBindVertexArray(0);
+
+	checkOpenGLError("ERROR: Could not destroy VAOs and VBOs.");
+	*/
+}
+
+/////////////////////////////////////////////////////////////////////// SCENE
+
+void drawScene()
+{
+
+	glUseProgram(ProgramId);
+	
+	Matrix4x4 O = createOrthoProjectionMatrix(2, -2, 2, -2, 0.1f, 20).transpose();
+	Matrix4x4 P = createPerspectiveProjection(50, 640 / 480, 0.1f, 10).transpose();
+	Matrix4x4 V = createViewMatrix(camX, camY, camZ, 0, 0, 0, 0, 1, 0).transpose();
+	Matrix4x4 M = createModelMatrix(0.0f, 0.0f, 0.0f, 0, 0, 0, 1, 1, 1).transpose();
+	Matrix4x4 M2 = createModelMatrix(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f).transpose();
+
+	glBindBuffer(GL_UNIFORM_BUFFER, VboId[0][1]);
+	if(gimbalLock)
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(Matrix), V.toFloatArray());
+	else {
+		Quaternion q1 = Quaternion(RotationAngleX, 1.0f, 0.0f, 0.0f).normalize();
+		Quaternion q2 = Quaternion(RotationAngleY, 0.0f, 1.0f, 0.0f).normalize();
+		Matrix4x4 VQ = createViewMatrixQuat(0.0f, 0.0f, 5.0f, 0, 0, 0, 0, 1, 0, q1, q2).transpose();
+		RotationAngleX = RotationAngleY = 0.0f;
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(Matrix), VQ.toFloatArray());
+	}
+
+	if(perspective == ORTHO)
+		glBufferSubData(GL_UNIFORM_BUFFER, sizeof(Matrix), sizeof(Matrix), O.toFloatArray());
+	else
+		glBufferSubData(GL_UNIFORM_BUFFER, sizeof(Matrix), sizeof(Matrix), P.toFloatArray());
+
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	///////////////////////////////////////////////////////////////
+	glBindVertexArray(VaoId[0]);
+	glUniformMatrix4fv(UniformId, 1, GL_FALSE, M.toFloatArray());
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+	glBindVertexArray(0);
+	///////////////////////////////////////////////////////////////
+	glBindVertexArray(VaoId[1]);
+	glUniformMatrix4fv(UniformId, 1, GL_FALSE, M2.toFloatArray());
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+	glBindVertexArray(0);
+
+	
+	glUseProgram(0);
+	glBindVertexArray(0);
+
+	checkOpenGLError("ERROR: Could not draw scene.");
+}
+
+// ------------------------------------------------------------
+//
+// Mouse Events
+//
+
+void processMouseButtons(int button, int state, int xx, int yy)
+{
+	// start tracking the mouse
+	if (state == GLUT_DOWN) {
+		startX = xx;
+		startY = yy;
+		if (button == GLUT_LEFT_BUTTON)
+			tracking = 1;
+		else if (button == GLUT_RIGHT_BUTTON)
+			tracking = 2;
+	}
+
+	//stop tracking the mouse
+	else if (state == GLUT_UP) {
+		if (tracking == 1) {
+			alpha -= (xx - startX);
+			beta += (yy - startY);
+		}
+		else if (tracking == 2) {
+			alpha -= (xx - startX);
+			beta += (yy - startY);
+		}
+		tracking = 0;
+	}
+}
+
+// Track mouse motion while buttons are pressed
+
+void processMouseMotion(int xx, int yy)
+{
+	float rAux;
+
+	deltaX = -xx + startX;
+	deltaY = yy - startY;
+	rAux = r;
+
+	alphaAux = (alpha + deltaX);
+	betaAux = (beta + deltaY);
+
+	// left mouse button: move camera
+
+	if (tracking == 1) {
+		if (betaAux > 90.0f)
+			betaAux = 90.0f;
+		else if (betaAux < -90.0f)
+			betaAux = -90.0f;
+	}
+
+	// right mouse button: zoom
+	else if (tracking == 2) {
+	}
+
+	camX = rAux * sin(alphaAux * 3.14f / 180.0f) * cos(betaAux * 3.14f / 180.0f);
+	camZ = rAux * cos(alphaAux * 3.14f / 180.0f) * cos(betaAux * 3.14f / 180.0f);
+	camY = rAux *   						       sin(betaAux * 3.14f / 180.0f);
+
+}
+
+void mouse(int button, int state, int x, int y)
+{
+	LastMousePositionX = x;
+	LastMousePositionY = y;
+	
+	if (state == GLUT_UP) {
+		printf("up\n");
+		RotationAngleX = RotationAngleY = 0.0f;
+	}
+		
+}
+
+void mouseMotion(int x, int y)
+{
+	float rAux;
+	rAux = r;
+
+	RotationAngleX = (float)(y - LastMousePositionY);
+	LastMousePositionY = y;
+	RotationAngleY = (float)(x - LastMousePositionX);
+	LastMousePositionX = x;
+	printf("rotationX: %f\nrotationY: %f\n", RotationAngleX, RotationAngleY);
+	camX = rAux * sin(RotationAngleX * 3.14f / 180.0f) * cos(RotationAngleY * 3.14f / 180.0f);
+	camZ = rAux * cos(RotationAngleX * 3.14f / 180.0f) * cos(RotationAngleY * 3.14f / 180.0f);
+	camY = rAux *   									 sin(RotationAngleY * 3.14f / 180.0f);
+	printf("camX: %f\ncamY: %f\ncamZ: %f\n", camX, camY,camZ);
+}
+
+void processKeys(unsigned char key, int xx, int yy)
+{
+	switch (key) {
+
+	case 27:
+		glutLeaveMainLoop();
+		break;
+
+	case 'p': 
+		if (perspective == ORTHO) {
+			printf("perspective\n");
+			perspective = PERSPECTIVE;
+		}
+		else {
+			printf("ortho\n");
+			perspective = ORTHO;
+		}
+		break;
+	case 'g':
+		if (gimbalLock == ON)
+			gimbalLock = OFF;
+		else
+			gimbalLock = ON;
+		break;
+	}
+}
+
+
+/////////////////////////////////////////////////////////////////////// CALLBACKS
+
+void cleanup()
+{
+	destroyShaderProgram();
+	destroyBufferObjects();
+}
+
+void display()
+{
+	++FrameCount;
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	drawScene();
+	glutSwapBuffers();
+}
+
+void idle()
+{
+	glutPostRedisplay();
+}
+
+void reshape(int w, int h)
+{
+	WinX = w;
+	WinY = h;
+	glViewport(0, 0, WinX, WinY);
+}
+
+void timer(int value)
+{
+	std::ostringstream oss;
+	oss << CAPTION << ": " << FrameCount << " FPS @ (" << WinX << "x" << WinY << ")";
+	std::string s = oss.str();
+	glutSetWindow(WindowHandle);
+	glutSetWindowTitle(s.c_str());
+	FrameCount = 0;
+	glutTimerFunc(1000, timer, 0);
+}
+
+/////////////////////////////////////////////////////////////////////// SETUP
+
+void setupCallbacks()
+{
+	glutKeyboardFunc(processKeys);
+	glutCloseFunc(cleanup);
+	glutDisplayFunc(display);
+	glutMouseFunc(mouse);
+	glutMotionFunc(mouseMotion);
+	glutIdleFunc(idle);
+	glutReshapeFunc(reshape);
+	glutTimerFunc(0, timer, 0);
+}
+
+void setupOpenGL() {
+	std::cerr << "CONTEXT: OpenGL v" << glGetString(GL_VERSION) << std::endl;
+	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_TRUE);
+	glDepthRange(0.0, 1.0);
+	glClearDepth(1.0);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
+	glFrontFace(GL_CCW);
+}
+
+void setupGLEW() {
+	glewExperimental = GL_TRUE;
+	GLenum result = glewInit();
+	if (result != GLEW_OK) {
+		std::cerr << "ERROR glewInit: " << glewGetString(result) << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	GLenum err_code = glGetError();
+}
+
+void setupGLUT(int argc, char* argv[])
+{
+	glutInit(&argc, argv);
+
+	glutInitContextVersion(3, 3);
+	glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
+	glutInitContextProfile(GLUT_CORE_PROFILE);
+
+	glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
+
+	glutInitWindowSize(WinX, WinY);
+	glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA);
+	WindowHandle = glutCreateWindow(CAPTION);
+	if (WindowHandle < 1) {
+		std::cerr << "ERROR: Could not create a new rendering window." << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+void init(int argc, char* argv[])
+{
+	// set the camera position based on its spherical coordinates
+	camX = r * sin(alpha * 3.14f / 180.0f) * cos(beta * 3.14f / 180.0f);
+	camZ = r * cos(alpha * 3.14f / 180.0f) * cos(beta * 3.14f / 180.0f);
+	camY = r *   						     sin(beta * 3.14f / 180.0f);
+
+	setupGLUT(argc, argv);
+	setupGLEW();
+	setupOpenGL();
+	createShaderProgram();
+	createBufferObjects();
+	setupCallbacks();
+
+}
+
+int main(int argc, char* argv[])
+{
+	srand(1);
+	init(argc, argv);
+	glutMainLoop();
+	exit(EXIT_SUCCESS);
+}
+
+///////////////////////////////////////////////////////////////////////

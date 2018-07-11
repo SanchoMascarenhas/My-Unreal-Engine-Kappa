@@ -1,0 +1,545 @@
+#include <iostream>
+#include <sstream>
+#include <string>
+
+#include "GL/glew.h"
+#include "GL/freeglut.h"
+#include "Vector2.h"
+#include "Vector3.h"
+#include "Matrix3x3.h"
+#include "Matrix2x2.h"
+#include "Matrix4x4.h"
+#include "ShaderProgram.h"
+#include "main.h"
+
+
+#define CAPTION "Hello Modern World"
+
+int WinX = 640, WinY = 480;
+int WindowHandle = 0;
+unsigned int FrameCount = 0;
+
+#define VERTICES 0
+#define COLORS 1
+
+ShaderProgram shaderProgram;
+GLuint VaoId[7], VboId[7][2], ProgramId, VertexShaderId, FragmentShaderId;
+GLint UniformId;
+
+/////////////////////////////////////////////////////////////////////// ERRORs
+
+bool isOpenGLError() {
+	bool isError = false;
+	GLenum errCode;
+	const GLubyte *errString;
+	while ((errCode = glGetError()) != GL_NO_ERROR) {
+		isError = true;
+		errString = gluErrorString(errCode);
+		std::cerr << "OpenGL ERROR [" << errString << "]." << std::endl;
+	}
+	return isError;
+}
+
+void checkOpenGLError(std::string error)
+{
+	if (isOpenGLError()) {
+		std::cerr << error << std::endl;
+		//exit(EXIT_FAILURE);
+	}
+}
+
+/////////////////////////////////////////////////////////////////////// SHADERs
+
+
+void createShaderProgram()
+{
+	
+	shaderProgram.init();
+	shaderProgram.loadShader(ShaderProgram::VERTEX_SHADER, "Shaders/SimpleVertexShader.vert");
+	shaderProgram.loadShader(ShaderProgram::FRAGMENT_SHADER, "Shaders/SimpleFragmentShader.frag");
+	
+		
+	glBindAttribLocation(shaderProgram.getProgramIndex(), VERTICES, "in_Position");
+	glBindAttribLocation(shaderProgram.getProgramIndex(), COLORS, "in_Color");
+	glLinkProgram(shaderProgram.getProgramIndex());
+	UniformId = glGetUniformLocation(shaderProgram.getProgramIndex(), "Matrix");
+
+	checkOpenGLError("ERROR: Could not create shaders.");
+}
+
+void destroyShaderProgram()
+{
+	glUseProgram(0);
+	glDetachShader(shaderProgram.getProgramIndex(), VertexShaderId);
+	glDetachShader(shaderProgram.getProgramIndex(), FragmentShaderId);
+
+	glDeleteShader(FragmentShaderId);
+	glDeleteShader(VertexShaderId);
+	glDeleteProgram(ProgramId);
+
+	checkOpenGLError("ERROR: Could not destroy shaders.");
+}
+
+/////////////////////////////////////////////////////////////////////// VAOs & VBOs
+
+typedef struct {
+	GLfloat XYZW[4];
+	GLfloat RGBA[4];
+} Vertex;
+
+typedef struct {
+	const Vertex *vertices;
+	const GLubyte *indices;
+	int sizeVertices;
+	int sizeIndices;
+} Figure;
+
+
+const GLubyte QuadIndices[] =
+{
+	0,3,2,2,1,0
+};
+
+const GLubyte TriangleIndices[] =
+{
+	0,2,1
+};
+
+const Vertex GreenTriangleVertices[] =
+{
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.0f, 0.5f, 0.0f, 1.0f } },
+	{ { 0.50f, -0.50f, 0.0f, 1.0f },{ 0.0f, 0.5f, 0.0f, 1.0f } },
+	{ { -0.50f, -0.50f, 0.0f, 1.0f },{ 0.0f, 0.5f, 0.0f, 1.0f } },
+
+
+
+};
+
+Figure GreenTriangle = {
+	{ GreenTriangleVertices },
+	{ TriangleIndices },
+	{sizeof(GreenTriangleVertices)},
+	{sizeof(TriangleIndices) }
+};
+
+const Vertex OrangeTriangleVertices[] =
+{
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.5f, 0.0f, 1.0f } },
+	{ { 0.50f, -0.50f, 0.0f, 1.0f },{ 0.9f, 0.5f, 0.0f, 1.0f } },
+	{ { -0.50f, -0.50f, 0.0f, 1.0f },{ 0.9f, 0.5f, 0.0f, 1.0f } }
+};
+
+Figure OrangeTriangle = {
+	{ OrangeTriangleVertices },
+	{ TriangleIndices },
+	{sizeof(GreenTriangleVertices)},
+	{ sizeof(TriangleIndices) }
+};
+
+const Vertex YeallowTriangleVertices[] =
+{
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },
+	{ { 0.50f, -0.50f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } },
+	{ { -0.50f, -0.50f, 0.0f, 1.0f },{ 0.9f, 0.9f, 0.0f, 1.0f } }
+};
+
+Figure YeallowTriangle = {
+	{ YeallowTriangleVertices },
+	{ TriangleIndices },
+	{ sizeof(GreenTriangleVertices) },
+	{ sizeof(TriangleIndices) }
+};
+
+const Vertex BrownTriangleVertices[] =
+{
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.4f, 0.2f, 0.0f, 1.0f } },
+	{ { 0.50f, -0.50f, 0.0f, 1.0f },{ 0.4f, 0.2f, 0.0f, 1.0f } },
+	{ { -0.50f, -0.50f, 0.0f, 1.0f },{ 0.4f, 0.2f, 0.0f, 1.0f } }
+};
+
+Figure BrownTriangle = {
+	{ BrownTriangleVertices },
+	{ TriangleIndices },
+	{ sizeof(GreenTriangleVertices) },
+	{ sizeof(TriangleIndices) }
+};
+
+const Vertex LightGreenTriangleVertices[] =
+{
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.4f, 0.9f, 0.3f, 1.0f } },
+	{ { 0.50f, -0.50f, 0.0f, 1.0f },{ 0.4f, 0.9f, 0.3f, 1.0f } },
+	{ { -0.50f, -0.50f, 0.0f, 1.0f },{ 0.4f, 0.9f, 0.3f, 1.0f } }
+};
+
+Figure LightGreenTriangle = {
+	{ LightGreenTriangleVertices },
+	{ TriangleIndices },
+	{ sizeof(GreenTriangleVertices) },
+	{ sizeof(TriangleIndices) }
+};
+
+const Vertex RhombusVertices[] =
+{
+	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } },
+	{ { 0.25f, 0.25f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } },
+	{ { 0.50f, 0.25f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } },
+	{ { 0.25f, 0.0f, 0.0f, 1.0f },{ 0.9f, 0.0f, 0.9f, 1.0f } }
+	
+};
+
+//0, 3, 2, 2, 1, 0
+Figure Rhombus = {
+	{ RhombusVertices },
+	{ QuadIndices },
+	{ sizeof(RhombusVertices) },
+	{ sizeof(QuadIndices) }
+};
+
+const Vertex SquareVertices[] =
+{
+	
+	{ { 0.0f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },
+	{ { 0.0f, 0.7f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },
+	{ { 0.7f, 0.7f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } },
+	{ { 0.7f, 0.0f, 0.0f, 1.0f },{ 0.6f, 0.0f, 0.0f, 1.0f } }
+
+};
+
+Figure Square = {
+	{ SquareVertices },
+	{ QuadIndices },
+	{ sizeof(SquareVertices) },
+	{ sizeof(QuadIndices) }
+};
+
+
+
+Figure figures[] = { Square, GreenTriangle, BrownTriangle, LightGreenTriangle, OrangeTriangle, YeallowTriangle, Rhombus };
+
+void createBufferObjects()
+{
+	glGenVertexArrays(7, VaoId);
+	for (int i = 0; i < 7; i++) {
+
+		glBindVertexArray(VaoId[i]);
+		{
+			glGenBuffers(2, VboId[i]);
+
+			glBindBuffer(GL_ARRAY_BUFFER, VboId[i][0]);
+			glBufferData(GL_ARRAY_BUFFER, figures[i].sizeVertices, figures[i].vertices, GL_STATIC_DRAW);
+
+			glEnableVertexAttribArray(VERTICES);
+			glVertexAttribPointer(VERTICES, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)0);
+
+			glEnableVertexAttribArray(COLORS);
+			glVertexAttribPointer(COLORS, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)sizeof(figures[i].vertices[0].XYZW));
+
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, VboId[i][1]);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, figures[i].sizeIndices, figures[i].indices, GL_STATIC_DRAW);
+
+		}
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	}
+
+	checkOpenGLError("ERROR: Could not create VAOs and VBOs.");
+}
+
+void destroyBufferObjects()
+{
+	for (int i = 0; i < 7; i++) {
+		glBindVertexArray(VaoId[i]);
+		glDisableVertexAttribArray(VERTICES);
+		glDisableVertexAttribArray(COLORS);
+		glDeleteBuffers(2, VboId[i]);
+		glDeleteVertexArrays(1, VaoId);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+		glBindVertexArray(0);
+	}
+	checkOpenGLError("ERROR: Could not destroy VAOs and VBOs.");
+	
+}
+
+/////////////////////////////////////////////////////////////////////// SCENE
+
+
+typedef GLfloat Matrix[16];
+
+
+const Matrix T = {
+	1.0f,  0.0f,  0.0f, 0.0f,
+	0.0f,  1.0f,  0.0f, 0.5f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+}; // Row Major (GLSL is Column Major)
+const Matrix I = {
+	1.0f,  0.0f,  0.0f,  0.0f,
+	0.0f,  1.0f,  0.0f,  0.0f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+}; // Row
+
+/* Major (GLSL is Column Major)
+
+const Matrix R = {
+	cos(3.14/2),  -sin(3.14/2),  0.0f, 0.0f,
+	sin(3.14/2),  cos(3.14/2),  0.0f, 0.0f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+const Matrix R45 = {
+	(0.25*cos(3.14 / 4)),  (0.25*-sin(3.14 / 4)),  0.0f, -0.25f,
+	(0.25*sin(3.14 / 4)),  (0.25*cos(3.14 / 4)),  0.0f, 0.25f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+const Matrix NegR45 = {
+	(0.25*cos(-3.14 / 4)),  (0.25*-sin(-3.14 / 4)),  0.0f, 0.25f,
+	(0.25*sin(-3.14 / 4)),  (0.25*cos(-3.14 / 4)),  0.0f, 0.25f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+const Matrix RHalfScale = {
+	(0.5*cos(3.14 / 2)),  (0.5*-sin(3.14 / 2)),  0.0f, 0.0f,
+	(0.5*sin(3.14 / 2)),  (0.5*cos(3.14 / 2)),  0.0f, 0.0f,
+	0.0f,  0.0f,  1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+const Matrix SHalf = {
+	0.5f,  0.0f,  0.0f,  -0.15f,
+	0.0f,  0.39f,  0.0f,  -0.25f,
+	0.0f,  0.0f,  0.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+const Matrix SInvert = {
+	-1.0f,  0.0f,  0.0f,  0.0f,
+	0.0f,  -1.0f,  0.0f,  -0.5f,
+	0.0f,  0.0f,  -1.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+const Matrix SQuarter = {
+	0.25f,  0.0f,  0.0f,  0.0f,
+	0.0f,  0.25f,  0.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  0.0f,
+	0.0f,  0.0f,  0.0f,  1.0f
+};
+
+Matrix3x3 createRotation(float angle) {
+	return Matrix3x3(cos(angle), -sin(angle), 1, sin(angle), cos(angle), 1, 1, 1, 1);
+}
+*/
+//Square, GreenTriangle, RedTriangle, LightGreenTriangle, OrangeTriangle, YeallowTriangle, Rhombus
+Matrix4x4 createScale(float xScalar, float yScalar, float zScalar) {
+	return Matrix4x4(xScalar, 0, 0, 0, 
+					0, yScalar, 0, 0, 
+					0, 0, zScalar, 0,
+					0, 0, 0, 1);
+}
+
+Matrix4x4 createRotation(float xRadian, float yRadian, float zRadian) {
+
+	Matrix4x4 xRotation = Matrix4x4(1, 0, 0, 0, 
+									0, cos(xRadian), -sin(xRadian), 0, 
+									0, sin(xRadian), cos(xRadian), 0,
+									0, 0, 0, 1);
+
+	Matrix4x4 yRotation = Matrix4x4(cos(yRadian), 0, sin(yRadian), 0,
+									0, 1, 0, 0,
+									-sin(yRadian), 0, cos(yRadian), 0,
+									0, 0, 0, 1);
+
+	Matrix4x4 zRotation = Matrix4x4(cos(zRadian), -sin(zRadian), 0, 0,
+									sin(zRadian), cos(zRadian), 0, 0,
+									0, 0, 1, 0,
+									0, 0, 0, 1);
+
+	return xRotation*yRotation*zRotation;
+}
+
+Matrix4x4 createTranslation(float x, float y, float z) {
+	return Matrix4x4(1, 0, 0, x,
+					0, 1, 0, y,
+					0, 0, 1, z,
+					0, 0, 0, 1);
+}
+
+
+void drawScene()
+{
+	glUseProgram(shaderProgram.getProgramIndex());
+
+		
+		//////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[1]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, I);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+/*		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[2]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, I);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[3]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, SInvert);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[4]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, NegR45);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[5]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, R45);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[0]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, SHalf);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+		/////////////////////////////////////////////////////////////////
+		glBindVertexArray(VaoId[6]);
+
+		glUniformMatrix4fv(UniformId, 1, GL_TRUE, I);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, (GLvoid*)0);
+
+		glBindVertexArray(0);
+	*/
+
+	glUseProgram(0);
+	checkOpenGLError("ERROR: Could not draw scene.");
+}
+
+/////////////////////////////////////////////////////////////////////// CALLBACKs
+
+void cleanup()
+{
+	//destroyShaderProgram();
+	destroyBufferObjects();
+}
+
+void display()
+{
+	++FrameCount;
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	drawScene();
+	glutSwapBuffers();
+}
+
+void idle()
+{
+	glutPostRedisplay();
+}
+
+void reshape(int w, int h)
+{
+	WinX = w;
+	WinY = h;
+	glViewport(0, 0, WinX, WinY);
+}
+
+void timer(int value)
+{
+	std::ostringstream oss;
+	oss << CAPTION << ": " << FrameCount << " FPS @ (" << WinX << "x" << WinY << ")";
+	std::string s = oss.str();
+	glutSetWindow(WindowHandle);
+	glutSetWindowTitle(s.c_str());
+	FrameCount = 0;
+	glutTimerFunc(1000, timer, 0);
+}
+
+/////////////////////////////////////////////////////////////////////// SETUP
+
+void setupCallbacks()
+{
+	glutCloseFunc(cleanup);
+	glutDisplayFunc(display);
+	glutIdleFunc(idle);
+	glutReshapeFunc(reshape);
+	glutTimerFunc(0, timer, 0);
+}
+
+void setupOpenGL() {
+	std::cerr << "CONTEXT: OpenGL v" << glGetString(GL_VERSION) << std::endl;
+	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_TRUE);
+	glDepthRange(0.0, 1.0);
+	glClearDepth(1.0);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
+	glFrontFace(GL_CCW);
+}
+
+void setupGLEW() {
+	glewExperimental = GL_TRUE;
+	GLenum result = glewInit();
+	if (result != GLEW_OK) {
+		std::cerr << "ERROR glewInit: " << glewGetString(result) << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	GLenum err_code = glGetError();
+}
+
+void setupGLUT(int argc, char* argv[])
+{
+	glutInit(&argc, argv);
+
+	glutInitContextVersion(3, 3);
+	glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
+	glutInitContextProfile(GLUT_CORE_PROFILE);
+
+	glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
+
+	glutInitWindowSize(WinX, WinY);
+	glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA);
+	WindowHandle = glutCreateWindow(CAPTION);
+	if (WindowHandle < 1) {
+		std::cerr << "ERROR: Could not create a new rendering window." << std::endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+void init(int argc, char* argv[])
+{
+	setupGLUT(argc, argv);
+	setupGLEW();
+	setupOpenGL();
+	createShaderProgram();
+	createBufferObjects();
+	setupCallbacks();
+}
+
+int main(int argc, char* argv[])
+{
+	init(argc, argv);
+	glutMainLoop();
+	exit(EXIT_SUCCESS);
+}
+
+///////////////////////////////////////////////////////////////////////
