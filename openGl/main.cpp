@@ -141,9 +141,9 @@ void createGraph() {
 	rhombohedron->setColor(Vector4(0.7f, 0.0f, 0.4f));
 	rhombohedron->setMesh(hedron);
 	rhombohedron->createBuffers();
-	rhombohedron->setModelMatrix(createTranslation(0.3f, -0.2f, 0.0f) *
-			createRotation(0.0f, 0.0f, 40.0f) *
-			createScale(0.3f, 0.3f, 0.5f));
+	rhombohedron->setModelMatrix(createTranslation(0.5f, 0.5f, 0.0f) *
+			createRotation(0.0f, 0.0f, 0.0f) *
+			createScale(0.5f, 0.25f, 0.5f));
 	/**/
 	table = root->createNode(root);
 	table->setColor(Vector4(0.6f, 0.29f, 0.0f));

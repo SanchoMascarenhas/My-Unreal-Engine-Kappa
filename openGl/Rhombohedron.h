@@ -3,7 +3,7 @@
 const float RhombohedronVertices[] =
 {
 	0.0f, 0.0f, 1.0f, 1.0f,  // 0 - FRONT
-	1.0f, 0.0f, 1.0f, 1.0f, // 1
+	1.0f, 0.0f, 1.0f, 1.0f,  // 1
 	1.5f, 1.0f, 1.0f, 1.0f,  // 2
 	1.5f, 1.0f, 1.0f, 1.0f,  // 2	
 	0.5f, 1.0f, 1.0f, 1.0f,  // 3
