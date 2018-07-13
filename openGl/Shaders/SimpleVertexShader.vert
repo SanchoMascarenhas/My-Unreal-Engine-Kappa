@@ -15,6 +15,5 @@
 	void main(void)
 	{
 		gl_Position = ProjectionMatrix * ViewMatrix * ModelMatrix * in_Position;
-		ex_Color = in_Position;
-		//ex_Color = in_Color;
+		ex_Color = in_Color;
 	}
